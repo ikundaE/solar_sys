@@ -1,0 +1,1247 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+    <head>
+        <meta http-equiv="content-type" content="text/html; 
+		charset=UTF-8">
+        <title>Final Project </title>
+        <!--This is important to get a correct canvas size on mobile-->
+        <meta name="viewport" content="width=device-width, 
+			user-scalable=no">
+        <style>
+            body {
+                margin: 2;
+                overflow: hidden;
+            }
+            canvas {
+                cursor: grab;
+                cursor: -webkit-grab;
+                cursor: -moz-grab;
+            }
+
+            canvas:active {
+                cursor: grabbing;
+                cursor: -webkit-grabbing;
+                cursor: -moz-grabbing;
+            }
+
+            #text {
+                position: absolute;
+                top: 6%;
+                left: 50%;
+                font-size: 35px;
+                font-family: OCR A;
+                color: yellow;
+                transform: translate(-50%,-50%);
+                -ms-transform: translate(-50%,-50%);
+                white-space: pre;
+            }
+        </style>
+        <div id="overlay">
+        <div id="text">[pg up] to speed up rotation [pg dn] to slow rotation
+       		[Space] to pause rotation
+	Scroll to zoom and arrow keys to shift view</div>
+        </div>
+    </head>
+    <body>
+        <script src="js/three.js"></script>
+        <script src="js/OrbitControls.js"></script>
+        <script src="js/postprocessing.min.js"></script>
+        <div id="container"></div>
+        <canvas id="c" height: 500px; width: 500px;></canvas>
+        <script id="fragment_shader1" type="x-shader/x-fragment">
+
+			#define MAX_ITER 1000.
+			#define R 100.
+			#define S(a,b,c) smoothstep(a,b,c)
+
+			uniform vec2 iResolution;
+			uniform vec2 iMouse;
+			uniform float iTime;
+			// need to define uv coord to map shaders to objects
+			varying vec2 vUv;
+
+			vec3 colorA = vec3(0.035,0.017,0.022);
+			vec3 colorB = vec3(0.995,0.922,0.755);
+			vec3 colorC = vec3(0.263,0.595,0.930);
+			vec3 colorD = vec3(0.020,0.016,0.012);
+
+
+			mat2 rotate2d(float _angle){
+			return mat2(cos(_angle),-sin(_angle),
+			sin(_angle),cos(_angle));
+			}
+			//conversion helper
+			float f(float n, vec3 hsl){
+			float k = mod(n+hsl.x*12., 12.);
+			float a = hsl.y*min(hsl.z, 1.-hsl.z);
+			return hsl.z-a*max(min(k-3., min(9.-k, 1.)),-1.);
+			}
+			// hsl in range <0, 1>^3
+			vec3 hsl2rgb(vec3 hsl){
+			return vec3(f(0.,hsl), f(8.,hsl), f(4.,hsl));
+			}
+
+			vec3 hue2rgb(float hue){
+			return hsl2rgb(vec3(hue, 1., .5));
+			}
+
+			//rain code borrowed from shadertoy, let me know if this is yours so I can credit it
+			vec2 Rain(vec2 uv, float t){
+			t*= 40.;
+			vec2 aspect = vec2(3.,1.);
+			vec2 st = uv*aspect-iMouse.xy/200.;
+
+			vec2 id = floor(st);
+			st.y+=t*.22;
+			float n = fract(sin(id.x*256.45)*85.);
+			st.y += n;
+			uv.y += n;
+			id = floor(st);
+			st = fract(st)-.5;
+
+			t+= fract(sin(id.x*56.45+id.y*485.)*155.)*6.28;
+
+			float y = -sin(t+sin(t+.5*sin(t)))*0.43;
+			float x = (fract(sin(id.x*384.45)*id.y*288.)-.5)*.6;
+			vec2 p1 = vec2(x, y);
+			vec2 o1 = (st-p1)/aspect;
+			float d = length(o1);
+
+			float m1 = S(.07, .0, d);
+
+			vec2 o2 = (fract(uv*aspect.x*vec2(1.,2.)-vec2(p1.x,0.))-.5)/vec2(1.,2.);
+			d = length(o2);
+
+			float m2 = S(0.2*(.5-st.y), .0, d) * S(-.1, .1, st.y-p1.y);
+
+			//if(st.x>.46 || st.y>.49) m1 = 1.;
+
+			return vec2(m1*o1*30.+m2*o2*10.);
+			}
+
+
+			vec4 hash42(vec2 p)
+			{
+			vec4 p4 = fract(vec4(p.xyxy) * vec4(.1031, .1030, .0973, .1099));
+			p4 += dot(p4, p4.wzxy+33.33);
+			return fract((p4.xxyz+p4.yzzw)*p4.zywx);
+			}
+
+			void main( )
+			{
+			vec2 uv = vUv; //( 2.*gl_FragCoord - iResolution.xy ) / iResolution.y;
+
+			uv=uv*rotate2d(cos(iTime)/12.); //horizon rotate (steer vehicle)
+			vec2 uv2=uv;
+
+			uv2.y+=sin(iTime)/7.;
+			//uv.y+=sin(iTime)/5.;
+
+			uv.x=abs(uv.x);//
+			float t =-iTime;
+			vec2 rain = Rain(uv.yx*2., t*.13);
+			rain += Rain(uv.yx*3., t*.15) * .25;
+			uv -= rain * 0.35;
+
+			float len = length(uv);
+			float len2= length(uv);
+
+			float ring =smoothstep(80.0*(sin(iTime*4.)+1.1)/3./iResolution.y, 0.0, abs(len-(tan((iTime+(3.141/2.)))+1.)/3.-.5));
+			ring+= smoothstep(80.0*(cos(iTime*4.)+1.1)/3./iResolution.y, 0.0, abs(len2-(tan((iTime))+1.)/3.-.5));
+
+			vec3 desertcolor = vec3(0.);
+			vec3 pct = vec3(uv2.y)-.3;
+
+			if(uv2.y>-.0)
+			{
+			desertcolor = mix(colorC, colorD, pct-.5);
+			} else{
+			desertcolor = mix(colorB, colorA, pct+0.304);  
+			}
+
+			gl_FragColor = vec4(ring);
+			gl_FragColor+=(hash42(uv*1e3+iTime*.2)-.5)*.2;  // optional film grain effect from https://www.shadertoy.com/view/tdy3DD
+
+			//gl_FragColor = vec4(smoothstep(4.0/iResolution.y, 0.0, abs(length(uv)-.6))); // non-moving ring
+
+			gl_FragColor=mix(vec4(desertcolor,.1),gl_FragColor,.5);
+			}
+
+        </script>
+        <script id="fragment_shader2" type="x-shader/x-fragment">
+
+			#define POINT_COUNT 8
+
+			vec2 points[POINT_COUNT];
+			uniform vec2 iResolution;
+			uniform vec2 iMouse;
+			uniform float iTime;
+			varying vec2 vUv;
+			const float speed = -0.1;
+			const float len = 0.25;
+			const float scale = 0.012;
+			float intensity = 0.8;
+			float radius = 0.03;
+
+			//https://www.shadertoy.com/view/MlKcDD
+			//Signed distance to a quadratic bezier
+			float sdBezier(vec2 pos, vec2 A, vec2 B, vec2 C){    
+			vec2 a = B - A;
+			vec2 b = A - 2.0*B + C;
+			vec2 c = a * 2.0;
+			vec2 d = A - pos;
+
+			float kk = 1.0 / dot(b,b);
+			float kx = kk * dot(a,b);
+			float ky = kk * (2.0*dot(a,a)+dot(d,b)) / 3.0;
+			float kz = kk * dot(d,a);      
+
+			float res = 0.0;
+
+			float p = ky - kx*kx;
+			float p3 = p*p*p;
+			float q = kx*(2.0*kx*kx - 3.0*ky) + kz;
+			float h = q*q + 4.0*p3;
+
+			if(h >= 0.0){
+			h = sqrt(h);
+			vec2 x = (vec2(h, -h) - q) / 2.0;
+			vec2 uv = sign(x)*pow(abs(x), vec2(1.0/3.0));
+			float t = uv.x + uv.y - kx;
+			t = clamp( t, 0.0, 1.0 );
+
+			// 1 root
+			vec2 qos = d + (c + b*t)*t;
+			res = length(qos);
+			}else{
+			float z = sqrt(-p);
+			float v = acos( q/(p*z*2.0) ) / 3.0;
+			float m = cos(v);
+			float n = sin(v)*1.732050808;
+			vec3 t = vec3(m + m, -n - m, n - m) * z - kx;
+			t = clamp( t, 0.0, 1.0 );
+
+			// 3 roots
+			vec2 qos = d + (c + b*t.x)*t.x;
+			float dis = dot(qos,qos);
+
+			res = dis;
+
+			qos = d + (c + b*t.y)*t.y;
+			dis = dot(qos,qos);
+			res = min(res,dis);
+
+			qos = d + (c + b*t.z)*t.z;
+			dis = dot(qos,qos);
+			res = min(res,dis);
+
+			res = sqrt( res );
+			}
+
+			return res;
+			}
+
+
+			//http://mathworld.wolfram.com/HeartCurve.html
+			vec2 getHeartPosition(float t){
+			return vec2(16.0 * sin(t) * sin(t) * sin(t),
+			-(13.0 * cos(t) - 5.0 * cos(2.0*t)
+			- 2.0 * cos(3.0*t) - cos(4.0*t)));
+			}
+
+			//https://www.shadertoy.com/view/3s3GDn
+			float getGlow(float dist, float radius, float intensity){
+			return pow(radius/dist, intensity);
+			}
+
+			float getSegment(float t, vec2 pos, float offset){
+			for(int i = 0; i < POINT_COUNT; i++){
+			points[i] = getHeartPosition(offset + float(i)*len + fract(speed * t) * 6.28);
+			}
+
+			vec2 c = (points[0] + points[1]) / 2.0;
+			vec2 c_prev;
+			float dist = 10000.0;
+
+			for(int i = 0; i < POINT_COUNT-1; i++){
+			//https://tinyurl.com/y2htbwkm
+			c_prev = c;
+			c = (points[i] + points[i+1]) / 2.0;
+			dist = min(dist, sdBezier(pos, scale * c_prev, scale * points[i], scale * c));
+			}
+			return max(0.0, dist);
+			}
+
+			void main( ){
+			vec2 uv = vUv;//gl_FragCoord/iResolution.xy;
+			float widthHeightRatio = iResolution.x/iResolution.y;
+			vec2 centre = vec2(0.5, 0.5);
+			vec2 pos = centre - uv;
+			pos.y /= widthHeightRatio;
+			//Shift upwards to centre heart
+			pos.y += 0.03;
+
+			float t = iTime;
+
+			//Get first segment
+			float dist = getSegment(t, pos, 0.0);
+			float glow = getGlow(dist, radius, intensity);
+
+			vec3 col = vec3(0.0);
+
+			//White core
+			col += 10.0*vec3(smoothstep(0.006, 0.003, dist));
+			//Pink glow
+			col += glow * vec3(0.94,0.14,0.4);
+
+			//Get second segment
+			dist = getSegment(t, pos, 3.4);
+			glow = getGlow(dist, radius, intensity);
+
+			//White core
+			col += 10.0*vec3(smoothstep(0.006, 0.003, dist));
+			//Blue glow
+			col += glow * vec3(0.2,0.6,1.0);
+
+			//Tone mapping
+			col = 1.0 - exp(-col);
+
+			//Output to screen
+			gl_FragColor = vec4(col,1.0);
+			}
+
+        </script>
+        <script id="fragment_shader3" type="x-shader/x-fragment">
+
+			// Forked from the amazing shader by mhnewman: https://www.shadertoy.com/view/XlXGD7
+
+			//	My first contribution to Shadertoy
+			//	I have been a big fan of this community for a while and I want to thank iq for
+			//	this wonderful site.
+			//	Hash functions from David Hoskins via https://www.shadertoy.com/view/4djSRW
+			uniform vec2 iResolution;
+			uniform vec2 iMouse;
+			uniform float iTime;
+			varying vec2 vUv;
+
+			const mat2 m = mat2(1.616, 1.212, -1.212, 1.616);
+
+			float hash12(vec2 p) {
+				p = fract(p * vec2(5.3983, 5.4427));
+				p += dot(p.yx, p.xy + vec2(21.5351, 14.3137));
+				return fract(p.x * p.y * 95.4337);
+			}
+
+			vec2 hash21(float p) {
+				vec2 p2 = fract(p * vec2(5.3983, 5.4427));
+				p2 += dot(p2.yx, p2.xy +  vec2(21.5351, 14.3137));
+				return fract(vec2(p2.x * p2.y * 95.4337, p2.x * p2.y * 97.597));
+			}
+
+			float noise(in vec2 p) {
+				vec2 i = floor(p);
+				vec2 f = fract(p);
+				vec2 u = f * f * (3.0 - 2.0 * f);
+
+				return mix(mix(hash12(i + vec2(0.0, 0.0)), 
+							   hash12(i + vec2(1.0, 0.0)), u.x),
+						   mix(hash12(i + vec2(0.0, 1.0)), 
+							   hash12(i + vec2(1.0, 1.0)), u.x), u.y);
+			}
+
+			float hash12_3(vec2 p) {
+				float f = hash12(p);
+				return f * f * f;
+			}
+
+			float noise_3(in vec2 p) {
+				vec2 i = floor(p);
+				vec2 f = fract(p);
+				vec2 u = f * f * (3.0 - 2.0 * f);
+
+				return mix(mix(hash12_3(i + vec2(0.0, 0.0)), 
+							   hash12_3(i + vec2(1.0, 0.0)), u.x),
+						   mix(hash12_3(i + vec2(0.0, 1.0)), 
+							   hash12_3(i + vec2(1.0, 1.0)), u.x), u.y);
+			}
+
+			float fbm(vec2 p) {
+				float f = 0.0;
+				f += 0.5 * noise(p); p = m * p;
+				f += 0.25 * noise(p); p = m * p;
+				f += 0.125 * noise(p); p = m * p;
+				f += 0.0625 * noise(p); p = m * p;
+				f += 0.03125 * noise(p); p = m * p;
+				f += 0.015625 * noise(p);
+				return f / 0.984375;
+			}
+
+			vec3 getDir(vec2 screenPos) {
+				screenPos -= 0.5;
+				screenPos.x *= iResolution.x / iResolution.y;
+				
+				return normalize(vec3(0.0, -1.0, -3.0)
+								 + screenPos.x * vec3(1.0, 0.0, 0.0)
+								 - screenPos.y * vec3(0.0, -0.948683298, 0.316227766));
+			}
+
+			bool getPosition(in vec3 camera, in vec3 dir, out vec2 pos) {
+				bool valid = false;
+				
+				float b = dot(camera, dir);
+				float c = dot(camera, camera) - 1.0;
+				float h = b * b - c;
+				if (h > 0.0) {
+					valid = true;
+					
+					vec3 p = camera + (-b - sqrt(h)) * dir;
+					pos = p.xz + iTime * vec2(0.005, 0.02);
+				}
+
+				return valid;
+			}
+
+			void main( ) {
+				vec2 screen = gl_FragCoord.xy / iResolution.xy;
+				
+				vec3 camera = vec3(0.0, 1.2, 0.7);
+				vec3 dir = getDir (vUv);
+				//vec3 dir = getDir(screen);
+				
+				vec3 earth = vec3(0.0, 0.0, 0.0);
+				vec2 position;
+				if (getPosition(camera, dir, position)) {
+					float geography = fbm(6.0 * position);
+
+					float coast = 0.2 * pow(geography + 0.5, 50.0);
+					float population = smoothstep(0.2, 0.6, fbm(2.0 * position) + coast);
+					vec2 p = 40.0 * position;
+					population *= (noise_3(p) + coast); p = m * p;
+					population *= (noise_3(p) + coast); p = m * p;
+					population *= (noise_3(p) + coast); p = m * p;
+					population *= (noise_3(p) + coast); p = m * p;
+					population *= (noise_3(p) + coast);
+					population = smoothstep(0.0, 0.02, population);
+
+					vec3 land = vec3(0.1 + 2.0 * population, 0.07 + 1.3 * population, population);
+					vec3 water = vec3(0.0, 0.05, 0.1);
+					vec3 ground = mix(land, water, smoothstep(0.49, 0.5, geography));
+
+					vec2 wind = vec2(fbm(30.0 * position), fbm(60.0 * position));
+					float weather = fbm(20.0 * (position + 0.03 * wind)) * (0.6 + 0.4 * noise(10.0 * position));
+
+					float clouds = 0.8 * smoothstep(0.35, 0.45, weather) * smoothstep(-0.25, 1.0, fbm(wind));
+					earth = mix(ground, vec3(0.5, 0.5, 0.5), clouds); 
+
+					float lightning = 0.0;
+					vec2 strike;
+					if (getPosition(camera, getDir(hash21(iTime)), strike)) {
+						vec2 diff = position - strike;
+						lightning += clamp(1.0 - 1500.0 * dot(diff, diff), 0.0, 1.0);
+					}
+					lightning *= smoothstep(0.65, 0.75, weather);
+					earth += lightning * vec3(1.0, 1.0, 1.0);
+				}
+				
+				vec3 altitude = camera - dir * dot(camera, dir);
+				float horizon = sqrt(dot(altitude, altitude));
+				
+				vec3 atmosphere = vec3(0.2, 0.25, 0.3);
+				atmosphere = mix(atmosphere, vec3(0.05, 0.1, 0.3), smoothstep(0.992, 1.004, horizon));
+				atmosphere = mix(atmosphere, vec3(0.1, 0.0, 0.0), smoothstep(1.0, 1.004, horizon));
+				atmosphere = mix(atmosphere, vec3(0.2, 0.17, 0.1), smoothstep(1.008, 1.015, horizon));
+				atmosphere = mix(atmosphere, vec3(0.0, 0.0, 0.0), smoothstep(1.015, 1.02, horizon));
+
+				horizon = clamp(pow(horizon, 20.0), 0.0, 1.0);
+				gl_FragColor = vec4(mix(earth, atmosphere, horizon), 1.0);
+			}
+        </script>
+        <script id="fragment_shader4" type="x-shader/x-vertex">
+
+			#ifdef GL_ES
+			precision mediump float;
+			#endif
+
+			uniform vec2 u_resolution;
+			uniform vec2 u_mouse;
+			uniform float u_time;
+			varying vec2 vUv;
+
+			#define PI 3.1415926535897932384626433832795
+
+			//this is a basic Pseudo Random Number Generator
+			float hash(in float n)
+			{
+			return fract(sin(n)*43758.5453123);
+			}
+
+			void main() {
+
+			//"squarified" coordinates
+			//vec2 xy = ( 2.* gl_FragCoord.xy - u_resolution.xy ) / u_resolution.y ;
+			vec2 xy = vUv;
+			//rotating light
+			vec3 center = vec3( sin( u_time ), 1., cos( u_time * .5 ) );
+
+			//temporary vector
+			vec3 pp = vec3(0.);
+
+			//maximum distance of the surface to the center (try a value of 0.1 for example)
+			float length = 4.;
+
+			//this is the number of cells
+			const float count = 100.;
+
+			for( float i = 0.; i < count; i+=1. )
+			{
+			//random cell: create a point around the center
+
+			//gets a 'random' angle around the center
+			float an = sin( u_time * PI * .00001 ) - hash( i ) * PI * 2.;
+
+			//gets a 'random' radius ( the 'spacing' between cells )
+			float ra = sqrt( hash( an ) ) * .5;
+
+			//creates a temporary 2d vector
+			vec2 p = vec2( center.x + cos( an ) * ra, center.z + sin( an ) * ra );
+
+			//finds the closest cell from the fragment's XY coords
+
+			//compute the distance from this cell to the fragment's coordinates
+			float di = distance( xy, p );
+
+			//and check if this length is inferior to the minimum length
+			length = min( length, di );
+
+			//if this cell was the closest
+			if( length == di )
+			{
+			//stores the XY values of the cell and compute a 'Z' according to them
+			pp.xy = p;
+			pp.z = i / count * xy.x * xy.y;
+			}
+			}
+
+			//shimmy shake:
+			//uses the temp vector's coordinates and uses the angle and the temp vector
+			//to create light & shadow (quick & dirty )
+			vec3 shade = vec3( 1. ) * ( 1. - max( 0.0, dot( pp, center ) ) );
+
+			//final color
+			gl_FragColor = vec4( pp + shade, 1. );
+
+			}
+
+        </script>
+        <script id="fragment_shader5" type="x-shader/x-vertex">
+
+			// Author @kyndinfo - 2016
+			// http://www.kynd.info
+			// Title: Terrain
+
+			#ifdef GL_ES
+			precision mediump float;
+			#endif
+
+			uniform vec2 u_resolution;
+			uniform vec2 u_mouse;
+			uniform float u_time;
+			varying vec2 vUv;
+
+			vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+			vec2 mod289(vec2 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+			vec3 permute(vec3 x) { return mod289(((x*34.0)+1.0)*x); }
+
+			float random (in vec2 st) {
+				return fract(sin(dot(st.xy,
+									 vec2(12.9898,78.233)))
+							* 43758.5453123);
+			}
+
+			float snoise(vec2 v) {
+				const vec4 C = vec4(0.211324865405187,  // (3.0-sqrt(3.0))/6.0
+									0.366025403784439,  // 0.5*(sqrt(3.0)-1.0)
+									-0.577350269189626,  // -1.0 + 2.0 * C.x
+									0.024390243902439); // 1.0 / 41.0
+				vec2 i  = floor(v + dot(v, C.yy) );
+				vec2 x0 = v -   i + dot(i, C.xx);
+				vec2 i1;
+				i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+				vec4 x12 = x0.xyxy + C.xxzz;
+				x12.xy -= i1;
+				i = mod289(i); // Avoid truncation effects in permutation
+				vec3 p = permute( permute( i.y + vec3(0.0, i1.y, 1.0 ))
+					+ i.x + vec3(0.0, i1.x, 1.0 ));
+
+				vec3 m = max(0.5 - vec3(dot(x0,x0), dot(x12.xy,x12.xy), dot(x12.zw,x12.zw)), 0.0);
+				m = m*m ;
+				m = m*m ;
+				vec3 x = 2.0 * fract(p * C.www) - 1.0;
+				vec3 h = abs(x) - 0.5;
+				vec3 ox = floor(x + 0.5);
+				vec3 a0 = x - ox;
+				m *= 1.79284291400159 - 0.85373472095314 * ( a0*a0 + h*h );
+				vec3 g;
+				g.x  = a0.x  * x0.x  + h.x  * x0.y;
+				g.yz = a0.yz * x12.xz + h.yz * x12.yw;
+				return 130.0 * dot(m, g);
+			}
+
+			float level(vec2 st) {
+				float n = 0.0;
+				for (float i = 1.0; i < 8.0; i ++) {
+					float m = pow(2.0, i);
+					n += snoise(st * m) * (1.0 / m);
+				}
+				return n * 0.5 + 0.5;
+			}
+
+			vec3 normal(vec2 st) {
+				float d = 0.0001;
+				float l0 = level(st);
+				float l1 = level(st + vec2(d, 0.0)); // slightly offset the x-coord
+				float l2 = level(st + vec2(0.0, d)); // slightly offset the y-coord
+				// return normalized vector perpendicular to the surface using the noise values as the elevation of these points
+				return normalize(vec3(-(l1 - l0), -(l2 - l0), d));
+			}
+
+			//https://en.wikipedia.org/wiki/Phong_reflection_model
+			vec3 phong(vec2 st, vec3 normal, vec3 lightPos) {
+				vec3 lightDir = normalize(vec3(lightPos - vec3(st, 0.0)));
+				float diffuse = max(0.0, dot(normal, lightDir));
+				vec3 vReflection = normalize(reflect(-lightDir, normal));
+				float specular = pow(max(0.0, dot(normal, vReflection)), 8.0);
+				vec3 ambientColor = vec3(0.1,0.0,0.2);
+				vec3 diffuseColor = vec3(0.0,0.5,0.2);
+				return min(vec3(1.0), ambientColor + diffuseColor * diffuse + specular);
+			}
+
+			void main() {
+				//vec2 st = gl_FragCoord.xy / u_resolution.xy;
+				vec2 st = vUv;
+				st.x *= u_resolution.x / u_resolution.y;
+				float t = u_time;
+				vec3 col = phong(st, normal(st), vec3(cos(t) * 0.5 + 0.5, sin(t) * 0.5 + 0.5, 1.0));
+				// water if the elevation is less than a threshold
+				float n = level(st);
+				if (n < 0.4) {col = vec3(0.0, 0.0, 0.2);}
+				gl_FragColor = vec4(col, 1.0);
+			}
+
+        </script>
+        <script id="fragment_shader6" type="x-shader/x-fragment">
+   
+			//Based on : https://www.shadertoy.com/view/4sBfDw
+
+
+			/*
+			Zachary Shore
+			DPA8090: Rendering and Shading
+			HW2: Fractal Brownian Motion
+			*/
+
+			#define M_PI 3.14159265359
+
+			//
+			// Description : Array and textureless GLSL 2D/3D/4D simplex 
+			//               noise functions.
+			//      Author : Ian McEwan, Ashima Arts.
+			//  Maintainer : stegu
+			//     Lastmod : 20110822 (ijm)
+			//     License : Copyright (C) 2011 Ashima Arts. All rights reserved.
+			//               Distributed under the MIT License. See LICENSE file.
+			//               https://github.com/ashima/webgl-noise
+			//               https://github.com/stegu/webgl-noise
+			uniform vec2 iResolution;
+			uniform vec2 iMouse;
+			uniform float iTime;
+			varying vec2 vUv;
+			vec3 mod289(vec3 x) {
+				return x - floor(x * (1.0 / 289.0)) * 289.0;
+			}
+
+			vec4 mod289(vec4 x) {
+				return x - floor(x * (1.0 / 289.0)) * 289.0;
+			}
+
+			vec4 permute(vec4 x) {
+				return mod289(((x*34.0)+1.0)*x);
+			}
+
+			vec4 taylorInvSqrt(vec4 r)
+			{
+				return 1.79284291400159 - 0.85373472095314 * r;
+			}
+
+			float snoise(vec3 v)
+			{ 
+				const vec2  C = vec2(1.0/6.0, 1.0/3.0) ;
+				const vec4  D = vec4(0.0, 0.5, 1.0, 2.0);
+
+				// First corner
+				vec3 i  = floor(v + dot(v, C.yyy) );
+				vec3 x0 =   v - i + dot(i, C.xxx) ;
+
+				// Other corners
+				vec3 g = step(x0.yzx, x0.xyz);
+				vec3 l = 1.0 - g;
+				vec3 i1 = min( g.xyz, l.zxy );
+				vec3 i2 = max( g.xyz, l.zxy );
+
+				//   x0 = x0 - 0.0 + 0.0 * C.xxx;
+				//   x1 = x0 - i1  + 1.0 * C.xxx;
+				//   x2 = x0 - i2  + 2.0 * C.xxx;
+				//   x3 = x0 - 1.0 + 3.0 * C.xxx;
+				vec3 x1 = x0 - i1 + C.xxx;
+				vec3 x2 = x0 - i2 + C.yyy; // 2.0*C.x = 1/3 = C.y
+				vec3 x3 = x0 - D.yyy;      // -1.0+3.0*C.x = -0.5 = -D.y
+
+				// Permutations
+				i = mod289(i); 
+				vec4 p = 
+					permute
+					(
+						permute
+						( 
+							permute
+							(
+								i.z + vec4(0.0, i1.z, i2.z, 1.0)
+							)
+							+ i.y + vec4(0.0, i1.y, i2.y, 1.0 )
+						)
+						+ i.x + vec4(0.0, i1.x, i2.x, 1.0 )
+					);
+
+				// Gradients: 7x7 points over a square, mapped onto an octahedron.
+				// The ring size 17*17 = 289 is close to a multiple of 49 (49*6 = 294)
+				float n_ = 0.142857142857; // 1.0/7.0
+				vec3  ns = n_ * D.wyz - D.xzx;
+
+				vec4 j = p - 49.0 * floor(p * ns.z * ns.z);  //  mod(p,7*7)
+
+				vec4 x_ = floor(j * ns.z);
+				vec4 y_ = floor(j - 7.0 * x_ );    // mod(j,N)
+
+				vec4 x = x_ *ns.x + ns.yyyy;
+				vec4 y = y_ *ns.x + ns.yyyy;
+				vec4 h = 1.0 - abs(x) - abs(y);
+
+				vec4 b0 = vec4( x.xy, y.xy );
+				vec4 b1 = vec4( x.zw, y.zw );
+
+				//vec4 s0 = vec4(lessThan(b0,0.0))*2.0 - 1.0;
+				//vec4 s1 = vec4(lessThan(b1,0.0))*2.0 - 1.0;
+				vec4 s0 = floor(b0)*2.0 + 1.0;
+				vec4 s1 = floor(b1)*2.0 + 1.0;
+				vec4 sh = -step(h, vec4(0.0));
+
+				vec4 a0 = b0.xzyw + s0.xzyw*sh.xxyy ;
+				vec4 a1 = b1.xzyw + s1.xzyw*sh.zzww ;
+
+				vec3 p0 = vec3(a0.xy,h.x);
+				vec3 p1 = vec3(a0.zw,h.y);
+				vec3 p2 = vec3(a1.xy,h.z);
+				vec3 p3 = vec3(a1.zw,h.w);
+
+				//Normalise gradients
+				vec4 norm = taylorInvSqrt(vec4(dot(p0,p0), dot(p1,p1), dot(p2, p2), dot(p3,p3)));
+				p0 *= norm.x;
+				p1 *= norm.y;
+				p2 *= norm.z;
+				p3 *= norm.w;
+
+				// Mix final noise value
+				vec4 m = max(0.6 - vec4(dot(x0,x0), dot(x1,x1), dot(x2,x2), dot(x3,x3)), 0.0);
+				m = m * m;
+				return 42.0 * dot( m*m, vec4( dot(p0,x0), dot(p1,x1), dot(p2,x2), dot(p3,x3) ) );
+			}
+
+			// p: position
+			// o: how many layers
+			// f: frequency
+			// lac: how fast frequency changes between layers
+			// r: how fast amplitude changes between layers
+			float fbm4(vec3 p, float theta, float f, float lac, float r)
+			{
+				mat3 mtx = mat3(
+					cos(theta), -sin(theta), 0.0,
+					sin(theta), cos(theta), 0.0,
+					0.0, 0.0, 1.0);
+
+				float frequency = f;
+				float lacunarity = lac;
+				float roughness = r;
+				float amp = 1.0;
+				float total_amp = 0.0;
+
+				float accum = 0.0;
+				vec3 X = p * frequency;
+				for(int i = 0; i < 4; i++)
+				{
+					accum += amp * snoise(X);
+					X *= (lacunarity + (snoise(X) + 0.1) * 0.006);
+					X = mtx * X;
+
+					total_amp += amp;
+					amp *= roughness;
+				}
+
+				return accum / total_amp;
+			}
+
+
+			float turbulence(float val)
+			{
+				float n = 1.0 - abs(val);
+				return n * n;
+			}
+
+			float pattern(in vec3 p, inout vec3 q, inout vec3 r)
+			{
+				q.x = fbm4( p + 0.0, 0.0, 1.0, 2.0, 0.33 );
+				q.y = fbm4( p + 6.0, 0.0, 1.0, 2.0, 0.33 );
+
+				r.x = fbm4( p + q - 2.4, 2.0, 1.0, 2.0, 0.5 );
+				r.y = fbm4( p + q + 8.2, 02.0, 1.0, 2.0, 0.5 );
+
+				q.x = turbulence( q.x );
+				q.y = turbulence( q.y );
+
+				float f = fbm4( p + (1.0 * r), 0.0, 1.0, 2.0, 0.5);
+
+				return f;
+			}
+
+			void main( )
+			{
+				vec2 st = gl_FragCoord.xy / iResolution.xy;
+				float aspect = iResolution.x / iResolution.y;
+				st.x *= aspect;
+
+				vec2 uv = vUv;
+
+				float t = iTime * 0.1;
+
+				vec3 spectrum[4];
+				spectrum[0] = vec3(1.00, 1.00, 0.00);
+				spectrum[1] = vec3(0.50, 0.00, 0.00);
+				spectrum[2] = vec3(1.00, 0.40, 0.20);
+				spectrum[3] = vec3(1.00, 0.60, 0.00);
+
+				uv -= 0.5;
+				uv-=10.*iMouse.xy/ iResolution.xy;
+				uv *= 30.;
+
+				vec3 p = vec3(uv.x, uv.y, t);
+				vec3 q = vec3(0.0);
+				vec3 r = vec3(0.0);
+				vec3 brigth_q = vec3(0.0);
+				vec3 brigth_r = vec3(0.0);
+				vec3 black_q = vec3(0.0);
+				vec3 black_r = vec3(0.0);
+				vec3 p2=vec3(p.xy*0.02,p.z*0.1);
+
+				float black= pattern(p2 ,black_q ,black_r );
+				black = smoothstep(0.9,0.1,length(black_q*black));
+
+				float brigth= pattern( p2*2.,brigth_q ,brigth_r );
+				brigth = smoothstep(0.0,0.8,brigth*length(brigth_q));
+
+				p+=min(length(brigth_q) ,length(black_q)  )*5.;
+
+				float f = pattern(p, q, r);
+
+				vec3 color = vec3(0.0);
+				color = mix(spectrum[1], spectrum[3], pow(length(q), 2.0));
+				color = mix(color, spectrum[3], pow(length(r), 1.4));
+
+				color = pow(color, vec3(2.0));
+
+				gl_FragColor =vec4( pow(black,2.)*(color +  spectrum[2]*brigth*5.), 1.0);
+
+			}
+
+        </script>
+        <script id="vertexShader" type="x-shader/x-vertex">
+			varying vec2 vUv;
+			void main()
+			{
+			vUv = uv;
+			vec4 mvPosition = modelViewMatrix * vec4( position, 1.0 );
+			gl_Position = projectionMatrix * mvPosition;
+			}
+        </script>
+        <script>
+            function main() {
+                const canvas = document.querySelector('#c');
+                const clock = new THREE.Clock();
+                const renderer = new THREE.WebGLRenderer({
+                    canvas,
+                    antialias: true
+                });
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                renderer.shadowMap.enabled = true;
+                renderer.shadowMap.type = THREE.VSMShadowMap;
+                const fov = 40;
+                const aspect = 2;
+                // the canvas default
+                const near = 0.1;
+                const far = 1000;
+                var uniforms1;
+                var uniforms2;
+
+                const camera = new THREE.PerspectiveCamera(fov,aspect,near,far);
+                camera.position.set(0, 0, 30);
+                camera.up.set(0, 0, 1);
+                camera.lookAt(0, 0, 0);
+                const scene = new THREE.Scene();
+                let ambient = new THREE.AmbientLight(0x367249);
+                scene.add(ambient);
+                scene.fog = new THREE.FogExp2(0x03544e,0.001);
+                renderer.setClearColor(scene.fog.color);
+                //array for objects
+                const objects = [];
+                const radius = 1;
+                const widthSegments = 32;
+                const heightSegments = 16;
+                //reused sphereGeometry
+                const sphereGeometry = new THREE.SphereBufferGeometry(radius,widthSegments,heightSegments);
+				sphereGeometry.castShadow = true; //default is false
+				sphereGeometry.receiveShadow = false; //default
+				//solarsystem for orbit
+                const solarSystem = new THREE.Object3D();
+                scene.add(solarSystem);
+                objects.push(solarSystem);
+                //uniforms1 for shaderToy
+                //uniforms2 for Book of Shaders
+                uniforms1 = {
+                    "iResolution": {
+                        value: new THREE.Vector2(window.innerWidth,window.innerHeight)
+                    },
+                    "iMouse": {
+                        value: new THREE.Vector2(0,0)
+                    },
+                    "iTime": {
+                        value: 1.0
+                    }
+                };
+                uniforms2 = {
+                    "u_resolution": {
+                        value: new THREE.Vector2(window.innerWidth,window.innerHeight)
+                    },
+                    "u_mouse": {
+                        value: new THREE.Vector2(0,0)
+                    },
+                    "u_time": {
+                        value: 1.0
+                    }
+                };
+                var params = [['fragment_shader1', uniforms1], 
+					  ['fragment_shader2', uniforms1], 
+					  ['fragment_shader3', uniforms1], 
+					  ['fragment_shader4', uniforms2], 
+					  ['fragment_shader5', uniforms2], 
+					  ['fragment_shader6', uniforms1]];
+                //to add each cloud for movement
+                const cloudParticles = [];
+                let loader = new THREE.TextureLoader();
+                //load cloud texture
+                loader.load("textures/smoke.png", function(texture) {
+                const cloudGeo = new THREE.PlaneBufferGeometry(100,50);
+                cloudMaterial = new THREE.MeshLambertMaterial({
+                    map: texture,
+                    transparent: true
+                    });
+					for (let p = 0; p < 300; p++) {
+						let cloud = new THREE.Mesh(cloudGeo,cloudMaterial);
+						cloud.position.set(Math.random() * 350 - 200, Math.random() * 200 - 100, 5);
+						cloud.rotation.x = 1.16;
+						cloud.rotation.z = Math.random() * 2 * Math.PI;
+						cloud.material.opacity = 0.3;
+						cloudParticles.push(cloud);
+						scene.add(cloud);
+                }
+                });
+				
+				//ambient red sunlight
+                let redLight = new THREE.PointLight(0xd8547e,50,150,5);
+                redLight.position.set(0, -40, 0);
+                scene.add(redLight);
+     
+                const bloomEffect = new POSTPROCESSING.BloomEffect({
+                    blendFunction: POSTPROCESSING.BlendFunction.COLOR_DODGE,
+                    kernelSize: POSTPROCESSING.KernelSize.SMALL,
+                    useLuminanceFilter: true,
+                    luminanceThreshold: 0.3,
+                    luminanceSmoothing: 0.75
+                });
+                bloomEffect.blendMode.opacity.value = 1.5;
+                const composer = new POSTPROCESSING.EffectComposer(renderer);
+                ;loader.load("textures/stars.jpg", function(texture) {
+
+                    const textureEffect = new POSTPROCESSING.TextureEffect({
+                        blendFunction: POSTPROCESSING.BlendFunction.COLOR_DODGE,
+                        texture: texture
+                    });
+                    textureEffect.blendMode.opacity.value = 1.2;
+                    bloomEffect.blendMode.opacity.value = 1.5;
+
+                    let effectPass = new POSTPROCESSING.EffectPass(camera,bloomEffect,textureEffect);
+                    effectPass.renderToScreen = true;
+
+                    composer.addPass(new POSTPROCESSING.RenderPass(scene,camera));
+                    composer.addPass(effectPass);
+
+                });
+				
+				//sungroup for lights and sunobject
+				const sunGroup = new THREE.Object3D();
+                const sunMaterial = new THREE.ShaderMaterial({
+                    uniforms: params[5][1],
+                    vertexShader: document.getElementById('vertexShader').textContent,
+                    fragmentShader: document.getElementById(params[5][0]).textContent,
+                });
+                const sunMesh = new THREE.Mesh(sphereGeometry,sunMaterial);
+                let sunlight = new THREE.PointLight(0xcc6600,50,70,3);
+                sunlight.castShadow = true;
+                sunlight.shadow.mapSize.width = 512;  // default
+				sunlight.shadow.mapSize.height = 512; // default
+				sunlight.shadow.camera.near = 0.5;       // default
+				sunlight.shadow.camera.far = 500      // default
+                sunlight.position.set(0, -30, -30);
+                sunGroup.add(sunlight);
+                sunMesh.scale.set(8, 8, 8);
+                sunGroup.add(sunMesh);
+                objects.push(sunMesh);
+                /////////////////////MERCURY/////////////////////////
+                const mercuryOrbit = new THREE.Object3D();
+                mercuryOrbit.position.x = 10;
+                mercuryOrbit.position.z = 5;
+                solarSystem.add(mercuryOrbit);
+                objects.push(mercuryOrbit);
+                const mercuryMaterial = new THREE.ShaderMaterial({
+                    uniforms: params[3][1],
+                    vertexShader: document.getElementById('vertexShader').textContent,
+                    fragmentShader: document.getElementById(params[3][0]).textContent
+                });
+                const mercuryMesh = new THREE.Mesh(sphereGeometry,mercuryMaterial);
+                mercuryMesh.scale.set(0.5, 0.5, 0.5);
+                mercuryOrbit.add(mercuryMesh);
+                objects.push(mercuryMesh);
+                solarSystem.add(sunGroup);
+                /////////////////////VENUS/////////////////////////
+                const venusOrbit = new THREE.Object3D();
+                venusOrbit.position.x = 15;
+                venusOrbit.position.z = -10;
+                solarSystem.add(venusOrbit);
+                objects.push(venusOrbit);
+                var venusMaterial = new THREE.ShaderMaterial( {
+							uniforms: params[ 0 ][ 1 ],
+							vertexShader: document.getElementById( 'vertexShader' ).textContent,
+							fragmentShader: document.getElementById( params [ 0 ] [ 0 ] ).textContent
+						} );
+				/*const venusMaterial = new THREE.MeshBasicMaterial({
+                    color: 0xbead41,
+                    wireframe: false
+                });*/
+                const venusMesh = new THREE.Mesh(sphereGeometry,venusMaterial);
+                venusOrbit.add(venusMesh);
+                objects.push(venusMesh);
+                /////////////////////EARTH///////////////////////////
+                const earthOrbit = new THREE.Object3D();
+				earthOrbit.position.x = 23;
+				solarSystem.add(earthOrbit);
+				objects.push(earthOrbit);
+				/*const eartTexture = new THREE.TextureLoader().load('textures/earth.jpg');
+				const earthMaterial = new THREE.MeshBasicMaterial(
+					{map : eartTexture, emissive: 0x112244});*/
+				var earthMaterial = new THREE.ShaderMaterial( {
+							uniforms: params[ 2 ][ 1 ],
+							vertexShader: document.getElementById( 'vertexShader' ).textContent,
+							fragmentShader: document.getElementById( params [ 2 ] [ 0 ] ).textContent
+						} );
+				//const earthMaterial = new THREE.MeshBasicMaterial({ color: 0x41a5be, wireframe: false} );	
+				const earthMesh = new THREE.Mesh(sphereGeometry, earthMaterial);
+				earthMesh.scale.set(2, 2, 2);
+				earthOrbit.add(earthMesh);
+				objects.push(earthMesh);
+                ///////////////////MOON//////////////////////////////
+                const moonOrbit = new THREE.Object3D();
+                moonOrbit.position.x = 3;
+                earthOrbit.add(moonOrbit);
+                const moonMaterial = new THREE.MeshPhongMaterial({
+                    color: 0x888888,
+                    emissive: 0x222222
+                });
+                const moonMesh = new THREE.Mesh(sphereGeometry,moonMaterial);
+                moonMesh.scale.set(.3, .3, .3);
+                moonOrbit.add(moonMesh);
+                objects.push(moonMesh);
+                /////////////////////MARS/////////////////////////
+                const marsOrbit = new THREE.Object3D();
+                marsOrbit.position.x = 30;
+                solarSystem.add(marsOrbit);
+                objects.push(marsOrbit);
+                const marsMaterial = new THREE.MeshBasicMaterial({
+                    color: 0xbe4b41,
+                    wireframe: false
+                });
+                const marsMesh = new THREE.Mesh(sphereGeometry,marsMaterial);
+                marsOrbit.add(marsMesh);
+                objects.push(marsMesh);
+                /////////////////////JUPITER/////////////////////////
+                const jupiterOrbit = new THREE.Object3D();
+                jupiterOrbit.position.x = 42;
+                solarSystem.add(jupiterOrbit);
+                objects.push(jupiterOrbit);
+                const jupiterMaterial = new THREE.ShaderMaterial({
+                    uniforms: params[4][1],
+                    vertexShader: document.getElementById('vertexShader').textContent,
+                    fragmentShader: document.getElementById(params[4][0]).textContent
+                });
+                const jupiterMesh = new THREE.Mesh(sphereGeometry,jupiterMaterial);
+                jupiterMesh.scale.set(4, 4, 4);
+                jupiterOrbit.add(jupiterMesh);
+                objects.push(jupiterMesh);
+                ///////////////////EUROPA//////////////////////////////
+                const europaOrbit = new THREE.Object3D();
+                europaOrbit.position.x = 7;
+                jupiterOrbit.add(europaOrbit);
+                const europaMaterial = new THREE.MeshBasicMaterial({
+                    color: 0x6610b7,
+                    wireframe: false
+                });
+                const europaMesh = new THREE.Mesh(sphereGeometry,europaMaterial);
+                europaMesh.scale.set(.6, .6, .6);
+                europaOrbit.add(europaMesh);
+                objects.push(europaMesh);
+                /////////////////////SATURN/////////////////////////
+                const saturnOrbit = new THREE.Object3D();
+                saturnOrbit.position.x = 60;
+                saturnOrbit.position.z = 15;
+                solarSystem.add(saturnOrbit);
+                objects.push(saturnOrbit);
+                const saturnMaterial = new THREE.ShaderMaterial({
+                    uniforms: params[1][1],
+                    vertexShader: document.getElementById('vertexShader').textContent,
+                    fragmentShader: document.getElementById(params[1][0]).textContent
+                });
+                const saturnMesh = new THREE.Mesh(sphereGeometry,saturnMaterial);
+                saturnMesh.scale.set(4, 4, 4);
+                saturnOrbit.add(saturnMesh);
+                objects.push(saturnMesh);
+
+                var starField;
+                function saturn(x, y, z, scene) {
+                    //This will add a starfield to the background of a scene
+
+                    var starsGeometry = new THREE.Geometry();
+
+                    for (var i = 0; i < 1000; i++) {
+
+                        var star = new THREE.Vector3();
+                        var angle = Math.random() * Math.PI * 10;
+                        star.x = x + Math.cos(angle) * 6 + Math.random();
+                        star.y = y + Math.sin(angle) * 6;
+                        star.z = z + Math.sin(angle) * 6 + Math.random();
+
+                        starsGeometry.vertices.push(star);
+
+                    }
+
+                    // create the particle variables
+                    var starsMaterial = new THREE.PointsMaterial({
+                        color: 0xf5ed05,
+                        size: 0.5,
+                        map: new THREE.TextureLoader().load("textures/star.jpg"),
+                        blending: THREE.AdditiveBlending,
+                        transparent: true
+                    });
+
+                    starField = new THREE.Points(starsGeometry,starsMaterial);
+
+                    saturnOrbit.add(starField);
+                }
+                saturn(0, 0, 0, scene);
+                saturnOrbit.rotation.x = 10;
+                let blueLight = new THREE.PointLight(0x3677ac,50,45,1.7);
+                blueLight.position.set(58, 0, 0);
+                saturnOrbit.add(blueLight);
+                ///////////////////MIMAS//////////////////////////////
+                const mimasOrbit = new THREE.Object3D();
+                mimasOrbit.position.x = 7;
+                mimasOrbit.position.y = 3;
+                saturnOrbit.add(mimasOrbit);
+                const mimasMaterial = new THREE.MeshBasicMaterial({
+                    color: 0x6F90505,
+                    wireframe: false
+                });
+                const mimasMesh = new THREE.Mesh(sphereGeometry,mimasMaterial);
+                mimasMesh.scale.set(.6, .6, .6);
+                mimasOrbit.add(mimasMesh);
+                objects.push(mimasMesh);
+                window.addEventListener('resize', onWindowResize, false);
+                function onWindowResize(event) {
+                    /*renderer.setSize( window.innerWidth, 
+					window.innerHeight );*/
+                    var width = window.innerWidth;
+                    var height = window.innerHeight;
+                    renderer.setSize(width, height);
+                    camera.aspect = width / height;
+                    camera.updateProjectionMatrix();
+                }
+
+                const controls = new THREE.OrbitControls(camera,renderer.domElement);
+                function resizeRendererToDisplaySize(renderer) {
+                    const canvas = renderer.domElement;
+                    const width = canvas.clientWidth;
+                    const height = canvas.clientHeight;
+                    const needResize = canvas.width !== width || canvas.height !== height;
+                    if (needResize) {
+                        renderer.setSize(width, height, false);
+                    }
+                    return needResize;
+                }
+                var delta = 0.001;
+                //input to adjust rotation
+                document.addEventListener("keydown", onDocumentKeyDown, false);
+                function onDocumentKeyDown(event) {
+                    var keyCode = event.which;
+                    if (keyCode == 34) {
+                        delta -= 0.001;
+                    } else if (keyCode == 33) {
+                        delta += 0.001;
+                    } else if (keyCode == 32) {
+                        delta = 0;
+                    }
+                }
+                ;function render(time) {
+                    composer.render(0.1);
+                    time *= 0.001;
+                    solarSystem.rotation.y += delta;
+                    if (resizeRendererToDisplaySize(renderer)) {
+                        const canvas = renderer.domElement;
+                        camera.aspect = canvas.clientWidth / canvas.clientHeight;
+                        camera.updateProjectionMatrix();
+                    }
+                    objects.forEach((obj)=>{
+                        if (obj != solarSystem) {
+                            uniforms1["iTime"].value = time * 2;
+                            uniforms2["u_time"].value = time * 2;
+                            obj.rotation.y = time;
+                        }
+                    }
+                    );
+                    cloudParticles.forEach(p=>{
+                        p.rotation.z -= 0.001;
+                    }
+                    );
+                    renderer.render(scene, camera);
+                    requestAnimationFrame(render);
+                }
+                requestAnimationFrame(render);
+            }
+            main();
+        </script>
+    </body>
+</html>
